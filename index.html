@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Peta Persebaran Sekolah di Kota Bandung - GeoLabUPI</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-search@2.9.0/dist/leaflet-search.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geojson@1.0.0/dist/leaflet-control-geocoder.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geojson@1.0.0/dist/leaflet-control-geojson.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder@1.0.0/dist/leaflet-control-geocoder.css" />
+    <!-- add GPS location -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.locatecontrol@0.72.0/dist/L.Control.Locate.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.locatecontrol@0.72.0/dist/L.Control.Locate.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body class="flex flex-col min-h-screen" x-data="{ open: false }">
+    <header class="bg-white shadow p-4 flex items-center justify-between">
+        <h1 class="text-xl font-bold text-gray-800">Persebaran Sekolah di Kota Bandung</h1>
+        <!-- Tombol toggle sidebar dengan animasi -->
+        <button class="md:hidden text-gray-800 toggle-btn" @click="open = !open" :class="{ 'active': open }">
+            <svg class="w-6 h-6 transition-transform duration-300 ease-in-out" :class="{ 'rotate-90': open }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7"></path>
+            </svg>
+        </button>
+    </header>
+    
+    <div class="flex flex-1 relative">
+        <!-- Sidebar -->
+        <div class="bg-gray-800 text-white w-64 p-4 md:block" :class="{ 'hidden': !open }">
+            <div x-data="{
+                kategori: '',
+                layers: { sd: true, smp: true, sma: true, man: true, mas: true, mi: true, mts: true },
+                sekolah: [],
+                selectedFeature: null,
+                map: null,
+                layer: null,
+                drawnItems: null,
+                exportFormat: 'geojson',
+                loadingLocation: false,
+                initMap() {
+                    this.map = L.map('map', { zoomControl: false }).setView([-6.9175, 107.6191], 13); 
+                    this.map.attributionControl.setPrefix(''); // Hapus attribution default
+                    
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '&copy; OpenStreetMap'
+                    }).addTo(this.map);
+
+                    this.layer = L.geoJSON().addTo(this.map);
+                    this.addCustomControls();
+                    this.loadData();
+                    // Digitasi
+                    this.drawnItems = new L.FeatureGroup();
+                    this.map.addLayer(this.drawnItems);
+                    const drawControl = new L.Control.Draw({
+                        edit: { featureGroup: this.drawnItems }
+                    });
+                    this.map.addControl(drawControl);
+
+                    this.map.on('draw:created', (e) => {
+                        const type = e.layerType;
+                        const layer = e.layer;
+                        this.drawnItems.addLayer(layer);
+                    });
+
+                    // Buat chart statistik
+                    this.buildChart(data);
+
+                    // Tambahkan Search Control
+                    this.addSearchControl(data);
+                },
+                loadData() {
+                    fetch('/geojson/Fasilitas_Pendidikan.geojson')
+                        .then(res => res.json())
+                        .then(data => {
+                            this.sekolah = data.features.map(feature => ({
+                                ...feature,
+                                properties: {
+                                    ...feature.properties,
+                                    kategori: feature.properties.Nama.includes('SD') || feature.properties.Nama.includes('SDN') ? 'sd' :
+                                              feature.properties.Nama.includes('SMP') ? 'smp' :
+                                              feature.properties.Nama.includes('SMA') || feature.properties.Nama.includes('SMAS') ? 'sma' :
+                                              feature.properties.Nama.includes('MAN') ? 'man' :
+                                              feature.properties.Nama.includes('MAS') ? 'mas' :
+                                              feature.properties.Nama.includes('MI') || feature.properties.Nama.includes('MIN') || feature.properties.Nama.includes('MIS') ? 'mi' :
+                                              feature.properties.Nama.includes('MTs') ? 'mts' :
+                                              'sd'
+                                }
+                            }));
+                            this.updateMap();
+                        });
+                },
+                updateMap() {
+                    let filtered = this.sekolah.filter(item => 
+                        this.layers[item.properties.kategori]
+                    );
+                    this.layer.clearLayers();
+                    this.layer = L.geoJSON({ type: 'FeatureCollection', features: filtered }, {
+                        pointToLayer: (feature, latlng) => {
+                            let color = {
+                                'sd': 'blue',
+                                'smp': 'green',
+                                'sma': 'yellow',
+                                'man': '#800080',
+                                'mas': '#FF4500',
+                                'mi': '#FFA500',
+                                'mts': '#6A5ACD'
+                            }[feature.properties.kategori] || 'gray';
+                            return L.circleMarker(latlng, { radius: 8, fillColor: color, color: '#000', weight: 1, opacity: 1, fillOpacity: 0.8 });
+                        },
+                        onEachFeature: (feature, layer) => {
+                            let popupContent = `
+                                <table style='font-family: Arial; font-size: 13px; line-height: 1.6;'>
+                                <h3 style='font-size: 16px; font-weight: bold; line-height: 2;'>Profil Sekolah</h3>
+                                    <tr>
+                                        <td style='vertical-align: top; font-weight: bold;'>Nama</td>
+                                        <td style='vertical-align: top;'>: ${feature.properties.Nama}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style='vertical-align: top; font-weight: bold;'>NPSN</td>
+                                        <td style='vertical-align: top;'>: ${feature.properties.NPSN}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style='vertical-align: top; font-weight: bold;'>Alamat</td>
+                                        <td style='vertical-align: top;'>: ${feature.properties.Alamat}</td>
+                                    </tr>
+                                </table>
+                                <a href='${feature.properties.Tautan}' target='_blank'>Lihat profil selengkapnya...</a>
+                            `;
+                            layer.bindPopup(popupContent);
+                            layer.on('click', () => this.selectedFeature = feature);
+                        }
+                    }).addTo(this.map);
+                },
+                zoomTo(item) {
+                    let [lng, lat] = item.geometry.coordinates;
+                    this.map.setView([lat, lng], 18);
+                    this.selectedFeature = item;
+
+                    // buka popup langsung
+                    this.layer.eachLayer(layer => {
+                        if (layer.feature && layer.feature.properties.Nama === item.properties.Nama) {
+                            layer.openPopup();
+                        }
+                    });
+                },
+                addCustomControls() {
+                    L.control.zoom({ position: 'topleft' }).addTo(this.map);
+                    L.control.scale({ position: 'bottomleft' }).addTo(this.map);
+                },
+                filteredSekolah() {
+                    if (this.kategori.length < 1) return [];
+                    return this.sekolah.filter(s => 
+                        s.properties.Nama.toLowerCase().includes(this.kategori.toLowerCase())
+                    ).slice(0, 10);
+                },
+                saveDigitasi() {
+                    const data = this.drawnItems.toGeoJSON();
+                    let blob, fileName, link;
+                    if (this.exportFormat === 'geojson') {
+                        blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+                        fileName = 'digitasi.geojson';
+                    } else if (this.exportFormat === 'kml') {
+                        blob = new Blob([togeojson.kml(data)], { type: 'application/xml' });
+                        fileName = 'digitasi.kml';
+                    } else if (this.exportFormat === 'shp') {
+                        const zip = shpwrite.zip(data);
+                        blob = zip;
+                        fileName = 'digitasi.zip';
+                    } else if (this.exportFormat === 'screenshot') {
+                        html2canvas(document.body).then(canvas => {
+                            canvas.toBlob((blob) => {
+                                link = document.createElement('a');
+                                link.href = URL.createObjectURL(blob);
+                                link.download = 'screenshot_website.png';
+                                link.click();
+                            });
+                        });
+                        return; // Keluar karena screenshot async
+                    }
+                    link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = fileName;
+                    link.click();
+                },
+                locateUser() {
+                    this.loadingLocation = true; // mulai loading
+                    this.map.locate({ setView: true, maxZoom: 16 });
+
+                    this.map.once('locationfound', (e) => {
+                        L.marker(e.latlng).addTo(this.map)
+                            .bindPopup('Lokasi Anda').openPopup();
+                        L.circle(e.latlng, { radius: e.accuracy / 2 }).addTo(this.map);
+
+                        this.loadingLocation = false; // selesai loading
+                    });
+
+                    this.map.once('locationerror', (e) => {
+                        alert('Geolocation tidak berhasil: ' + e.message);
+                        this.loadingLocation = false; // matikan loading walau error
+                    });
+                }
+            }" x-init="initMap(); selectedFeature = null;">
+                <h2 class="text-lg font-semibold mb-4">Pencarian Sekolah</h2>
+                <p class="text-sm text-gray-400 mb-4">Gunakan pencarian untuk menemukan sekolah tertentu.</p>
+
+                <!-- Input dengan dropdown suggestion -->
+                <div class="mb-4 relative">
+                    <input x-model="kategori" 
+                           class="w-full p-2 rounded bg-gray-700 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500" 
+                           placeholder="Cari nama sekolah..." type="text">
+                    
+                    <!-- Dropdown hasil pencarian -->
+                    <ul x-show="filteredSekolah().length > 0" 
+                        class="absolute z-10 bg-white text-black border border-gray-200 w-full mt-1 max-h-60 overflow-y-auto rounded shadow">
+                        <template x-for="item in filteredSekolah()" :key="item.properties.Nama">
+                            <li @click="zoomTo(item); kategori=item.properties.Nama;" 
+                                class="px-3 py-2 hover:bg-blue-100 cursor-pointer"
+                                x-text="item.properties.Nama"></li>
+                        </template>
+                    </ul>
+                </div>
+                
+                <!-- Tombol Geolocation Manual -->
+                <button @click="locateUser()" 
+                        class="mt-4 bg-blue-500 text-white p-2 rounded w-full flex justify-center items-center hover:bg-blue-600 transition-colors">
+                    
+                    <!-- Spinner muncul kalau loadingLocation true -->
+                    <svg x-show="loadingLocation" class="animate-spin h-5 w-5 mr-2 text-white" 
+                        xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" 
+                            d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                    </svg>
+                    
+                    <span x-text="loadingLocation ? 'Mencari lokasi...' : 'Temukan Lokasi Saya'"></span>
+                </button>
+
+                <hr class="border-gray-600 mb-4">
+
+                <!-- Checkbox filter kategori -->
+                <div class="mb-4">
+                    <h3 class="text-sm font-semibold mb-2">Kategori Sekolah</h3>
+                    <template x-for="(val, key) in layers" :key="key">
+                        <label class="flex items-center mb-2 transition-colors hover:bg-gray-700 rounded cursor-pointer">
+                            <input type="checkbox" :value="key" x-model="layers[key]" @change="updateMap()" class="mr-2">
+                            <span class="w-4 h-4 inline-block mr-2 rounded-full" 
+                                  :class="{
+                                    'bg-blue-500': key === 'sd',
+                                    'bg-green-500': key === 'smp',
+                                    'bg-yellow-500': key === 'sma',
+                                    'bg-purple-500': key === 'man',
+                                    'bg-red-500': key === 'mas',
+                                    'bg-yellow-300': key === 'mi',
+                                    'bg-indigo-500': key === 'mts'
+                                  }"></span>
+                            <span x-text="key.toUpperCase()"></span>
+                        </label>
+                    </template>
+                </div>
+                
+                <!-- Pilihan tipe peta dasar -->
+                <div class="mb-4">
+                    <h3 class="text-sm font-semibold mb-2">Tipe Peta Dasar</h3>
+                    <template x-for="(layer, key) in { 'ESRI World Imagery': true, 'Google Satellite': true, 'OpenStreetMap': true}" :key="key">
+                        <label class="flex items-center mb-2 transition-colors hover:bg-gray-700 rounded cursor-pointer">
+                            <input type="radio" name="basemap" :value="key" @change="
+                                Object.keys(map._layers).forEach(lid => {
+                                    let lyr = map._layers[lid];
+                                    if (lyr.options && lyr.options.attribution) {
+                                        map.removeLayer(lyr);
+                                    }
+                                });
+                                if (key === 'ESRI World Imagery') {
+                                    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                                        attribution: 'Tiles &copy; Esri'
+                                    }).addTo(map);
+                                } else if (key === 'Google Satellite') {
+                                    L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                                        attribution: '&copy; Google'
+                                    }).addTo(map);
+                                } else if (key === 'OpenStreetMap') {
+                                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                                        attribution: '&copy; OpenStreetMap'
+                                    }).addTo(map);
+                                } 
+                            " class="mr-2">
+                            <span class="inline-block"
+                                  :class="{
+                                    key === 'ESRI World Imagery',
+                                    key === 'Google Satellite'
+                                  }"></span>
+                            <span x-text="key"></span>
+                        </label>
+                    </template>
+                </div>
+
+                <hr class="border-gray-600 mb-4">
+
+                <!-- Dropdown untuk pilih format save -->
+                <div class="mb-4">
+                    <h3 class="text-sm font-semibold mb-2">Simpan Hasil Digitasi</h3>
+                    <p class="text-sm text-gray-400 mb-2">Pilih format file untuk menyimpan hasil digitasi.</p>
+                    <select x-model="exportFormat" class="w-full p-2 rounded bg-gray-700 text-white hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors">
+                        <option value="geojson">GeoJSON</option>
+                        <option value="kml">KML</option>
+                        <option value="shp">Shapefile</option>
+                        <option value="screenshot">Screenshot</option>
+                    </select>
+                    <button @click="saveDigitasi()" class="mt-2 bg-green-500 text-white p-2 rounded w-full hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 transition-colors">Simpan</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Peta -->
+        <div id="map" class="flex-1">
+            <div class="custom-legend p-2">
+                <h3 class="text-sm font-semibold mb-2">Legenda</h3>
+                <div class="flex items-center mb-1">
+                    <span class="w-4 h-4 bg-blue-500 inline-block mr-2 rounded-full"></span><span>SD</span>
+                </div>
+                <div class="flex items-center mb-1">
+                    <span class="w-4 h-4 bg-green-500 inline-block mr-2 rounded-full"></span><span>SMP</span>
+                </div>
+                <div class="flex items-center mb-1">
+                    <span class="w-4 h-4 bg-yellow-500 inline-block mr-2 rounded-full"></span><span>SMA</span>
+                </div>
+                <div class="flex items-center mb-1">
+                    <span class="w-4 h-4 bg-purple-500 inline-block mr-2 rounded-full"></span><span>MAN</span>
+                </div>
+                <div class="flex items-center mb-1">
+                    <span class="w-4 h-4 bg-red-500 inline-block mr-2 rounded-full"></span><span>MAS</span>
+                </div>
+                <div class="flex items-center mb-1">
+                    <span class="w-4 h-4 bg-yellow-300 inline-block mr-2 rounded-full"></span><span>MI</span>
+                </div>
+                <div class="flex items-center">
+                    <span class="w-4 h-4 bg-indigo-500 inline-block mr-2 rounded-full"></span><span>MTs</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <!-- Add GPS Location -->
+    <script src="https://unpkg.com/leaflet.locatecontrol@0.72.0/dist/L.Control.Locate.min.js"></script>
+    <script src="https://unpkg.com/togeojson@0.16.0/togeojson.js"></script>
+    <script src="https://unpkg.com/shp-write@0.3.2/shpwrite.js"></script>
+    <script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+</body>
+</html>
