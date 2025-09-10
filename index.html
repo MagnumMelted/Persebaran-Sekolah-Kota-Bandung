@@ -74,7 +74,7 @@
                     this.addSearchControl(data);
                 },
                 loadData() {
-                    fetch('/geojson/Fasilitas_Pendidikan.geojson')
+                    fetch('geojson/Fasilitas_Pendidikan.geojson')
                         .then(res => res.json())
                         .then(data => {
                             this.sekolah = data.features.map(feature => ({
@@ -357,3 +357,4 @@
     <script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </body>
 </html>
+
