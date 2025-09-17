@@ -303,7 +303,7 @@ document.addEventListener("alpine:init", () => {
         // III. METODE UNTUK MANAJEMEN DATA
         // ----------------------------------------------------------------
         loadData() {
-            fetch('/geojson/Fasilitas_Pendidikan.geojson')
+            fetch('https://raw.githubusercontent.com/MagnumMelted/Persebaran-Sekolah-Kota-Bandung/f9cd0f41456769e5400ba40f880adb9722b1b56c/geojson/Fasilitas_Pendidikan.geojson')
                 .then(res => res.json())
                 .then(data => {
                     this.sekolah = data.features.map(feature => ({
