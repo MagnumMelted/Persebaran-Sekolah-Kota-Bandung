@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Layout Peta</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" />
+    <style>
+        body { font-family: 'Roboto', sans-serif; }
+        #layout-container { width: 1024px; height: 768px; }
+        .leaflet-control-scale-line { background-color: rgba(255, 255, 255, 0.7) !important; }
+    </style>
+</head>
+<body class="bg-gray-200 flex flex-col items-center p-4">
+
+    <div class="mb-4 w-[1024px] flex flex-col items-center">
+        <h1 class="text-xl font-bold my-2">Preview Layout Peta</h1>
+            <div class="mb-3 w-[1024px]">
+                <label class="text-sm font-semibold block mb-1">Zoom Layout Peta</label>
+                <input id="zoom-slider" type="range" min="10" max="500" step="5" value="100"
+                        class="w-full accent-blue-500">
+                <p id="zoom-label" class="text-xs text-gray-600 mt-1 text-center">100% (Zoom 13)</p>
+            </div>
+        
+            <div>
+                <button id="download-btn" class="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700">
+                    Unduh sebagai PNG
+                </button>
+            </div>
+    </div>
+
+    <div class="mb-3 w-[1024px] flex justify-between items-center">
+        <div>
+            <label class="text-sm font-semibold block mb-1">Basemap</label>
+            <select id="basemap-select" class="p-2 border rounded text-sm">
+                <option value="osm" selected>OpenStreetMap</option>
+                <option value="google">Google Satellite</option>
+                <option value="esri">ESRI World Imagery</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="layout-container" class="bg-white p-4 flex flex-col shadow-lg border">
+        <h1 id="layout-title" class="text-2xl font-bold text-center mb-2"></h1>
+
+        <div class="flex-1 flex border border-gray-400">
+            <div id="layout-map" class="flex-1 h-full"></div>
+            
+            <div class="w-48 p-2 border-l border-gray-400 flex flex-col bg-gray-50">
+                <h3 class="text-md font-bold mb-2">Legenda</h3>
+                <div id="layout-legend-container" class="text-xs space-y-1"></div>
+                <div class="flex-grow"></div> <div id="layout-north-arrow" class="flex justify-center items-center h-16 relative">
+                     <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M12 2L12 22M12 2L6 10M12 2L18 10"/></svg>
+                     <span class="font-bold absolute top-0 text-sm">U</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-xs text-gray-600 mt-1">
+            <span id="layout-source">Sumber Peta Dasar: OpenStreetMap Contributors</span>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js"></script>
+    
+    <script>
+        window.onload = function () {
+            // Ambil data yang dikirim dari halaman utama
+            const layoutData = JSON.parse(sessionStorage.getItem('layoutData'));
+            if (!layoutData) {
+                document.body.innerHTML = '<h1>Tidak ada data untuk ditampilkan. Silakan buat layout dari halaman utama.</h1>';
+                return;
+            }
+
+            // --- Isi Elemen Layout ---
+            document.getElementById('layout-title').innerText = layoutData.title;
+            document.getElementById('layout-legend-container').innerHTML = layoutData.legendHTML;
+
+            // --- Inisialisasi Peta ---
+            const map = L.map('layout-map', {
+                center: layoutData.center,
+                zoom: layoutData.zoom,
+                zoomControl: false,
+                attributionControl: false,
+                zoomSnap: 0,
+                zoomDelta: 0.1
+            });
+
+            // daftar basemap
+            const baseLayers = {
+                osm: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '&copy; OpenStreetMap' }),
+                google: L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', { attribution: '&copy; Google' }),
+                esri: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { attribution: 'Tiles © Esri' })
+            };
+
+            // tambahkan default
+            baseLayers.osm.addTo(map);
+
+            // ganti basemap saat dropdown berubah
+            document.getElementById('basemap-select').addEventListener('change', (e) => {
+                const selected = e.target.value;
+                Object.values(baseLayers).forEach(layer => map.removeLayer(layer));
+                baseLayers[selected].addTo(map);
+            });
+
+            // --- Kontrol Zoom Layout ---
+            const zoomSlider = document.getElementById('zoom-slider');
+            const zoomLabel = document.getElementById('zoom-label');
+
+            // Simpan zoom awal layoutData.zoom sebagai referensi
+            const baseZoom = layoutData.zoom ? parseFloat(layoutData.zoom) : map.getZoom();
+
+            zoomSlider.addEventListener('input', () => {
+                const percent = parseInt(zoomSlider.value);
+                const scale = percent / 100;
+
+                const newZoom = baseZoom + Math.log2(scale);
+                map.setZoom(newZoom);
+
+                zoomLabel.textContent = `${percent}% (Zoom ${newZoom.toFixed(2)})`;
+            });
+
+
+            // --- Tambahkan Layer ke Peta ---
+            const schoolStyle = (feature) => {
+                const color = {sd: 'blue', smp: 'green', sma: 'yellow', man: '#800080', mas: '#FF4500', mi: '#FFA500', mts: '#6A5ACD'}[feature.properties.kategori] || 'gray';
+                return { radius: 8, fillColor: color, color: '#000', weight: 1, opacity: 1, fillOpacity: 0.8 };
+            };
+            if (layoutData.schools) L.geoJSON(layoutData.schools, { pointToLayer: (f, l) => L.circleMarker(l, schoolStyle(f)) }).addTo(map);
+            if (layoutData.drawnItems) {
+                L.geoJSON(layoutData.drawnItems, {
+                    style: function (feature) {
+                        const c = feature.properties?.color || '#3388ff';
+                        return {
+                            color: c,
+                            fillColor: c,
+                            weight: 2,
+                            opacity: 1,
+                            fillOpacity: 0.4
+                        };
+                    },
+                    pointToLayer: function (feature, latlng) {
+                        const c = feature.properties?.color || '#3388ff';
+                        return L.circleMarker(latlng, {
+                            radius: 6,
+                            color: c,
+                            fillColor: c,
+                            fillOpacity: 1
+                        });
+                    }
+                }).addTo(map);
+            };
+            if (layoutData.analysis) L.geoJSON(layoutData.analysis, { style: { color: '#00FFFF', opacity: 0.8, fillOpacity: 0.3 } }).addTo(map);
+
+            // --- Fungsionalitas Tombol Unduh ---
+            document.getElementById('download-btn').onclick = function () {
+                const layoutContainer = document.getElementById('layout-container');
+                this.innerText = 'Memproses...';
+                this.disabled = true;
+
+                htmlToImage.toPng(layoutContainer, { pixelRatio: 2, cacheBust: true })
+                    .then(function (dataUrl) {
+                        const link = document.createElement('a');
+                        link.download = `${layoutData.title.replace(/ /g, '_')}.png`;
+                        link.href = dataUrl;
+                        link.click();
+                        
+                        // Tutup window setelah selesai
+                        setTimeout(() => window.close(), 1000);
+                    })
+                    .catch(function (error) {
+                        console.error('oops, something went wrong!', error);
+                        alert('Gagal membuat gambar.');
+                    })
+                    .finally(() => {
+                        this.innerText = 'Unduh sebagai PNG';
+                        this.disabled = false;
+                    });
+            };
+        };
+    </script>
+</body>
+</html>
